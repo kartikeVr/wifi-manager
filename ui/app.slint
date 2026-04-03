@@ -1,0 +1,702 @@
+import { Button, CheckBox, LineEdit } from "std-widgets.slint";
+
+component CustomScrollBar {
+    in property <bool> enabled: true;
+    in-out property <bool> horizontal: false;
+    in-out property <length> maximum;
+    in-out property <length> page-size;
+    in-out property <length> value;
+    in property <ScrollBarPolicy> policy: ScrollBarPolicy.as-needed;
+
+    private property <length> track-size: root.horizontal ? root.width - 2 * offset : root.height - 2 * offset;
+    private property <length> offset: 4px;
+
+    width: 6px;
+    height: 100%;
+    visible: (self.policy == ScrollBarPolicy.always-on) || (self.policy == ScrollBarPolicy.as-needed && self.maximum > 0);
+
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        background: #0000;
+        clip: true;
+
+        thumb := Rectangle {
+            width: root.horizontal ? max(20px, root.track-size * root.page-size / (root.maximum + root.page-size)) : 4px;
+            height: root.horizontal ? 4px : max(20px, root.track-size * root.page-size / (root.maximum + root.page-size));
+            x: root.horizontal ? root.offset + (root.track-size - self.width) * (-root.value / root.maximum) : (parent.width - self.width) / 2;
+            y: root.horizontal ? (parent.height - self.height) / 2 : root.offset + (root.track-size - self.height) * (-root.value / root.maximum);
+            border-radius: self.width / 2;
+            background: scroll-touch.pressed ? Theme.primary-hover : (scroll-touch.has-hover ? Theme.primary : Theme.primary.transparentize(40%));
+            opacity: scroll-touch.has-hover || scroll-touch.pressed ? 1.0 : 0.5;
+            animate background, opacity { duration: 200ms; easing: ease-out; }
+        }
+    }
+
+    scroll-touch := TouchArea {
+        property <length> pressed-value;
+        width: 100%;
+        height: 100%;
+        mouse-cursor: pointer;
+
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                self.pressed-value = -root.value;
+            }
+        }
+
+        moved => {
+            if (self.enabled && self.pressed) {
+                root.value = -max(0px, min(root.maximum, self.pressed-value + (
+                    root.horizontal ? (scroll-touch.mouse-x - scroll-touch.pressed-x) * (root.maximum / (root.track-size - thumb.width))
+                    : (scroll-touch.mouse-y - scroll-touch.pressed-y) * (root.maximum / (root.track-size - thumb.height))
+                )));
+            }
+        }
+
+        scroll-event(event) => {
+            if (root.horizontal && event.delta-x != 0) {
+                root.value = max(-root.maximum, min(0px, root.value + event.delta-x));
+                return accept;
+            } else if (!root.horizontal && event.delta-y != 0) {
+                root.value = max(-root.maximum, min(0px, root.value + event.delta-y));
+                return accept;
+            }
+            reject
+        }
+    }
+}
+
+component CustomScrollView {
+    in property <bool> enabled: true;
+    out property <length> visible-width <=> flickable.width;
+    out property <length> visible-height <=> flickable.height;
+    in-out property <length> viewport-width <=> flickable.viewport-width;
+    in-out property <length> viewport-height <=> flickable.viewport-height;
+    in-out property <length> viewport-x <=> flickable.viewport-x;
+    in-out property <length> viewport-y <=> flickable.viewport-y;
+    in property <ScrollBarPolicy> vertical-scrollbar-policy <=> vertical-bar.policy;
+    in property <ScrollBarPolicy> horizontal-scrollbar-policy <=> horizontal-bar.policy;
+
+    callback scrolled <=> flickable.flicked;
+
+    min-height: 50px;
+    min-width: 50px;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    preferred-height: 100%;
+    preferred-width: 100%;
+
+    flickable := Flickable {
+        interactive: false;
+        viewport-y <=> vertical-bar.value;
+        viewport-x <=> horizontal-bar.value;
+        width: 100%;
+        height: 100%;
+
+        @children
+    }
+
+    vertical-bar := CustomScrollBar {
+        enabled: root.enabled;
+        x: parent.width - self.width;
+        y: 0;
+        height: parent.height;
+        maximum: flickable.viewport-height - flickable.height;
+        page-size: flickable.height;
+    }
+
+    horizontal-bar := CustomScrollBar {
+        enabled: root.enabled;
+        width: parent.width;
+        height: 6px;
+        y: parent.height - self.height;
+        x: 0;
+        horizontal: true;
+        maximum: flickable.viewport-width - flickable.width;
+        page-size: flickable.width;
+    }
+}
+
+export struct NetworkInfo {
+    ssid: string,
+    signal: int,
+    security: string,
+    in_use: bool,
+    channel: string,
+}
+
+export struct ConnectedDevice {
+    hostname: string,
+    mac: string,
+    ip: string,
+    vendor: string,
+}
+
+global Theme {
+    out property <color> bg: #1a1e2e;
+    out property <color> header-bg: #1a1e2e;
+    out property <color> card-bg: #1a1e2e;
+    out property <color> shadow-light: #1f2437;
+    out property <color> shadow-dark: #10121c;
+    out property <color> primary: #8b5cf6;
+    out property <color> primary-hover: #7c3aed;
+    out property <color> text-main: #f8fafc;
+    out property <color> text-muted: #94a3b8;
+    out property <color> success: #10b981;
+    out property <color> warning: #f59e0b;
+    out property <color> danger: #ef4444;
+    out property <color> border: #1e293b;
+    out property <color> divider: #334155;
+}
+
+component NeumorphicPanel inherits Rectangle {
+    in property <bool> pressed: false;
+    in property <bool> has-hover: false;
+    in property <length> radius: 12px;
+    in property <color> main-color: Theme.bg;
+    
+    border-radius: radius;
+    background: pressed ? main-color.darker(5%) : (has-hover ? main-color.brighter(10%) : main-color);
+    animate background { duration: 150ms; }
+
+    // Bottom-right dark shadow
+    drop-shadow-color: pressed ? #0000 : (has-hover ? Theme.shadow-dark.darker(10%) : Theme.shadow-dark);
+    drop-shadow-offset-x: has-hover ? 5px : 4px;
+    drop-shadow-offset-y: has-hover ? 5px : 4px;
+    drop-shadow-blur: has-hover ? 10px : 8px;
+    
+    animate drop-shadow-offset-x, drop-shadow-offset-y, drop-shadow-blur { duration: 150ms; }
+
+    // Top-left light shadow
+    Rectangle {
+        x: has-hover ? -5px : -4px; 
+        y: has-hover ? -5px : -4px;
+        width: parent.width; height: parent.height;
+        background: #0000;
+        border-radius: radius;
+        drop-shadow-color: pressed ? #0000 : Theme.shadow-light;
+        drop-shadow-offset-x: 0px;
+        drop-shadow-offset-y: 0px;
+        drop-shadow-blur: has-hover ? 10px : 8px;
+        z: -1;
+        animate x, y, drop-shadow-blur { duration: 150ms; }
+    }
+
+    if (pressed) : Rectangle {
+        border-radius: radius;
+        border-width: 2px;
+        border-color: Theme.shadow-dark;
+        background: main-color.darker(10%);
+    }
+}
+
+component IconButton inherits Rectangle {
+    in property <string> icon-text;
+    in property <bool> busy: false;
+    callback clicked <=> touch.clicked;
+    
+    width: 44px;
+    height: 44px;
+    
+    NeumorphicPanel {
+        pressed: touch.pressed;
+        has-hover: touch.has-hover;
+        radius: 10px;
+        
+        Text {
+            text: icon-text;
+            font-size: 22px;
+            color: Theme.text-main;
+            opacity: busy ? 0.3 : 1.0;
+            animate opacity { duration: 200ms; }
+        }
+    }
+    
+    touch := TouchArea { mouse-cursor: pointer; }
+}
+
+component SignalIndicator inherits Rectangle {
+    in property <int> signal;
+    
+    property <color> signal-color: 
+        (signal <= 25) ? #ef4444 : 
+        (signal <= 50) ? #f59e0b : 
+        (signal <= 75) ? #84cc16 : 
+        #10b981;
+
+    in property <color> inactive-color: Theme.divider.transparentize(85%);
+    
+    width: 32px;
+    height: 20px;
+    
+    HorizontalLayout {
+        spacing: 2px;
+        alignment: center;
+        for i in [1, 2, 3, 4] : Rectangle {
+            width: 5px;
+            height: i * 4px + 4px;
+            y: parent.height - self.height;
+            background: (signal >= (i * 25 - 15)) ? signal-color : inactive-color;
+            border-radius: 1px;
+            animate background { duration: 150ms; }
+        }
+    }
+}
+
+component ConfigField inherits Rectangle {
+    in property <string> label;
+    in-out property <string> value;
+    in property <string> icon: "✎";
+
+    height: 60px;
+    background: Theme.bg;
+    border-radius: 16px;
+
+    NeumorphicPanel { radius: 16px; pressed: true; }
+
+    HorizontalLayout {
+        padding-left: 20px;
+        padding-right: 16px;
+        spacing: 12px;
+        Text { text: icon; color: Theme.primary; font-size: 18px; vertical-alignment: center; width: 24px; }
+        Text { text: label; width: 100px; color: Theme.text-muted; font-size: 13px; font-weight: 700; vertical-alignment: center; }
+        LineEdit {
+            text <=> value;
+            font-size: 15px;
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "Wi-Fi Manager";
+    min-width: 420px;
+    height: 700px;
+    background: Theme.bg;
+    default-font-family: "Inter, sans-serif";
+    
+    in property <bool> wifi-enabled: true;
+    in property <[NetworkInfo]> networks: [];
+    in property <bool> is-busy: false;
+    in property <string> busy-message: "";
+    in-out property <string> notification-message: "";
+    in property <bool> notification-success: false;
+    
+    in-out property <bool> show-advanced: false;
+    in property <NetworkInfo> current-network;
+    in-out property <string> ip-address: "";
+    in-out property <string> gateway: "";
+    in-out property <string> dns: "";
+    in property <string> mac-address: "";
+    in property <string> current-device-hostname: "";
+    in property <[ConnectedDevice]> connected-devices: [];
+    in property <bool> loading-devices: false;
+
+    in-out property <bool> show-password-modal: false;
+    in property <string> password-ssid: "";
+    in-out property <string> password-input: "";
+
+    callback toggle-wifi(bool);
+    callback scan-networks();
+    callback connect-network(string);
+    callback disconnect-network();
+    callback forget-network(string);
+    callback open-advanced(string);
+    callback close-advanced();
+    callback apply-settings(string, string, string, string); 
+    callback submit-password(string, string); 
+    callback refresh-devices();
+    callback copy-ip(string);
+    callback exit();
+
+    forward-focus: key-handler;
+    key-handler := FocusScope {
+        key-pressed(event) => {
+            if (event.text == "\u{001b}") { 
+                exit();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    VerticalLayout {
+        spacing: 0px;
+        padding: 0px;
+
+        Rectangle {
+            height: 120px;
+            background: Theme.header-bg;
+            vertical-stretch: 0;
+            
+            HorizontalLayout {
+                padding-left: 32px;
+                padding-right: 32px;
+                alignment: space-between;
+                
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 6px;
+                    Text {
+                        text: show-advanced ? "Settings" : "Wi-Fi";
+                        font-size: 32px;
+                        font-weight: 800;
+                        color: Theme.text-main;
+                    }
+                    if (!show-advanced) : Text {
+                        text: wifi-enabled ? (networks.length > 0 ? networks.length + " networks" : "Searching...") : "Offline";
+                        font-size: 15px;
+                        font-weight: 600;
+                        color: wifi-enabled ? Theme.success : Theme.text-muted;
+                    }
+                    if (show-advanced) : Text {
+                        text: current-network.ssid;
+                        font-size: 15px;
+                        color: Theme.text-muted;
+                        overflow: elide;
+                    }
+                }
+                
+                HorizontalLayout {
+                    padding-top: 20px; 
+                    alignment: center;
+                    spacing: 24px;
+                    
+                    if (!show-advanced && wifi-enabled) : IconButton {
+                        icon-text: "↻";
+                        busy: is-busy;
+                        clicked => { scan-networks(); }
+                    }
+                    
+                    if (!show-advanced) : Rectangle {
+                        width: 52px;
+                        height: 28px;
+                        
+                        NeumorphicPanel {
+                            radius: 14px;
+                            has-hover: power-touch.has-hover;
+                            main-color: wifi-enabled ? Theme.primary : Theme.bg;
+                        }
+                        
+                        Rectangle {
+                            x: wifi-enabled ? 26px : 4px;
+                            y: 4px;
+                            width: 20px;
+                            height: 20px;
+                            background: white;
+                            border-radius: 10px;
+                            animate x { duration: 200ms; easing: ease-in-out; }
+                            
+                            drop-shadow-color: #0004;
+                            drop-shadow-offset-y: 1px;
+                            drop-shadow-blur: 2px;
+                        }
+                        
+                        power-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { toggle-wifi(!wifi-enabled); }
+                        }
+                    }
+                    
+                    if (show-advanced) : IconButton {
+                        icon-text: "✕";
+                        clicked => { close-advanced(); }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            clip: true;
+            background: Theme.bg;
+
+            CustomScrollView {
+                networks-list := VerticalLayout {
+                    padding: 24px;
+                    spacing: 20px;
+                    alignment: start;
+                    
+                    if (!show-advanced) : VerticalLayout {
+                        spacing: 20px;
+                        vertical-stretch: 0;
+                        
+                        if (is-busy) : Rectangle {
+                            height: 40px;
+                            background: rgba(139, 92, 246, 0.1);
+                            border-radius: 10px;
+                            vertical-stretch: 0;
+                            HorizontalLayout {
+                                padding-left: 16px;
+                                spacing: 12px;
+                                alignment: start;
+                                Text { text: "●"; color: Theme.primary; font-size: 12px; vertical-alignment: center; }
+                                Text { text: busy-message; color: Theme.primary; font-size: 14px; font-weight: 700; vertical-alignment: center; }
+                            }
+                        }
+
+                        if (wifi-enabled) : VerticalLayout {
+                            spacing: 20px;
+                            padding-bottom: 20px;
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            vertical-stretch: 0;
+                            for net in networks : Rectangle {
+                                height: 84px;
+                                vertical-stretch: 0;
+                                NeumorphicPanel {
+                                    pressed: card-touch.pressed;
+                                    has-hover: card-touch.has-hover;
+                                    main-color: net.in-use ? rgba(139, 92, 246, 0.15) : Theme.bg;
+                                }
+                                
+                                HorizontalLayout {
+                                    padding: 20px;
+                                    padding-left: 20px;
+                                    padding-right: 20px;
+                                    spacing: 20px;
+                                    
+                                    Rectangle {
+                                        width: 44px;
+                                        height: 44px;
+                                        background: Theme.bg;
+                                        border-radius: 10px;
+                                        VerticalLayout {
+                                            alignment: center;
+                                            SignalIndicator { signal: net.signal; }
+                                            Text {
+                                                text: net.signal + "%";
+                                                font-size: 9px;
+                                                color: Theme.text-muted;
+                                                horizontal-alignment: center;
+                                            }
+                                        }
+                                    }
+                                    
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 4px;
+                                        Text { text: net.ssid; font-size: 18px; font-weight: 700; color: Theme.text-main; overflow: elide; }
+                                        Text { 
+                                            text: (net.in-use ? "Connected" : (net.security == "" ? "Open" : net.security));
+                                            font-size: 14px; 
+                                            color: net.in-use ? Theme.success : Theme.text-muted; 
+                                        }
+                                    }
+                                    
+                                    Rectangle { } 
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Text { text: "❯"; font-size: 16px; color: Theme.divider; }
+                                    }
+                                }
+
+                                card-touch := TouchArea {
+                                    clicked => { connect-network(net.ssid); }
+                                    pointer-event(evt) => {
+                                        if (evt.button == PointerEventButton.right && evt.kind == PointerEventKind.down) {
+                                            open-advanced(net.ssid);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (!wifi-enabled) : VerticalLayout {
+                            alignment: center;
+                            spacing: 24px;
+                            vertical-stretch: 0;
+                            Text { text: "📴"; font-size: 80px; horizontal-alignment: center; }
+                            Text { text: "Wi-Fi is turned off"; font-size: 22px; font-weight: 700; color: Theme.text-main; horizontal-alignment: center; }
+                            Text { text: "Enable it to see nearby networks"; font-size: 16px; color: Theme.text-muted; horizontal-alignment: center; }
+                        }
+                    }
+
+                    if (show-advanced) : VerticalLayout {
+                        padding-bottom: 40px;
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 20px;
+                        vertical-stretch: 0;
+                        
+                        HorizontalLayout {
+                            spacing: 12px;
+                            alignment: start;
+                            for stat in [{v: current-network.signal + "%", c: Theme.success, i: "📶"}, {v: "CH " + current-network.channel, c: Theme.primary, i: "📡"}, {v: current-network.security == "" ? "OPEN" : "SECURE", c: Theme.warning, i: "🔒"}] : Rectangle {
+                                height: 36px;
+                                background: Theme.divider.transparentize(90%);
+                                border-radius: 18px;
+                                border-width: 1.5px;
+                                border-color: stat.c;
+                                HorizontalLayout {
+                                    padding-left: 14px;
+                                    padding-right: 14px;
+                                    spacing: 8px;
+                                    Text { text: stat.i; font-size: 16px; vertical-alignment: center; color: Theme.text-main; }
+                                    Text { text: stat.v; font-size: 13px; font-weight: 800; color: Theme.text-main; vertical-alignment: center; }
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 16px;
+                            Text { text: "IP CONFIGURATION"; font-size: 12px; font-weight: 800; color: Theme.text-muted; letter-spacing: 1.5px; }
+                            VerticalLayout {
+                                spacing: 12px;
+                                ConfigField { label: "Address"; value <=> ip-address; icon: "📍"; }
+                                ConfigField { label: "Gateway"; value <=> gateway; icon: "🌐"; }
+                                ConfigField { label: "DNS"; value <=> dns; icon: "📛"; }
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 20px;
+                            Rectangle {
+                                height: 56px;
+                                apply-touch := TouchArea { mouse-cursor: pointer; clicked => { apply-settings(current-network.ssid, ip-address, gateway, dns); } }
+                                NeumorphicPanel {
+                                    pressed: apply-touch.pressed;
+                                    has-hover: apply-touch.has-hover;
+                                    main-color: Theme.primary;
+                                    radius: 18px;
+                                }
+                                Text { text: "Save & Apply Changes"; color: white; font-weight: 800; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                            
+                            HorizontalLayout {
+                                spacing: 20px;
+                                height: 52px;
+                                Rectangle {
+                                    forget-touch := TouchArea { mouse-cursor: pointer; clicked => { forget-network(current-network.ssid); } }
+                                    NeumorphicPanel {
+                                        pressed: forget-touch.pressed;
+                                        has-hover: forget-touch.has-hover;
+                                        radius: 18px;
+                                    }
+                                    Text { text: "Forget Network"; color: Theme.danger; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                                if (current-network.in_use) : Rectangle {
+                                    disconnect-touch := TouchArea { mouse-cursor: pointer; clicked => { disconnect-network(); } }
+                                    NeumorphicPanel {
+                                        pressed: disconnect-touch.pressed;
+                                        has-hover: disconnect-touch.has-hover;
+                                        radius: 18px;
+                                    }
+                                    Text { text: "Disconnect"; color: Theme.text-main; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                            }
+                        }
+
+                        if (current-network.in_use) : VerticalLayout {
+                            spacing: 20px;
+                            HorizontalLayout {
+                                alignment: space-between;
+                                Text { text: "NETWORK DEVICES"; font-size: 12px; font-weight: 800; color: Theme.text-muted; letter-spacing: 1.5px; vertical-alignment: center; }
+                                IconButton {
+                                    icon-text: "↻";
+                                    busy: loading-devices;
+                                    clicked => { refresh-devices(); }
+                                }
+                            }
+                            
+                            VerticalLayout {
+                                spacing: 20px;
+                                for dev in connected-devices : Rectangle {
+                                    height: 84px;
+                                    vertical-stretch: 0;
+                                    NeumorphicPanel { 
+                                        has-hover: dev-touch.has-hover;
+                                        radius: 18px; 
+                                    }
+                                    dev-touch := TouchArea {}
+                                    HorizontalLayout {
+                                        padding-left: 24px;
+                                        padding-right: 24px;
+                                        spacing: 16px;
+                                        alignment: space-between;
+                                        VerticalLayout {
+                                            alignment: center;
+                                            spacing: 4px;
+                                            Text { 
+                                                text: dev.hostname != "" ? dev.hostname : (dev.vendor != "Unknown" ? dev.vendor : "Unknown Device"); 
+                                                font-weight: 800; font-size: 16px; color: Theme.text-main; 
+                                            }
+                                            Text { text: dev.mac; font-size: 11px; color: Theme.text-muted; font-family: "monospace"; }
+                                        }
+                                        Text { text: dev.ip; color: Theme.primary; font-weight: 800; font-size: 15px; font-family: "monospace"; vertical-alignment: center; }
+                                    }
+                                }
+                                
+                                if (!loading-devices && connected-devices.length == 0) : Rectangle {
+                                    height: 80px;
+                                    vertical-stretch: 0;
+                                    NeumorphicPanel { radius: 18px; main-color: Theme.bg.darker(2%); }
+                                    Text { text: "No other devices found"; font-size: 14px; color: Theme.text-muted; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (show-password-modal) : Rectangle {
+        background: rgba(0,0,0,0.6);
+        TouchArea { } 
+        Rectangle {
+            width: 400px;
+            height: 280px;
+            NeumorphicPanel { radius: 24px; }
+            VerticalLayout {
+                padding: 32px;
+                spacing: 24px;
+                Text { text: "Authentication Required"; font-size: 20px; font-weight: 800; color: Theme.text-main; horizontal-alignment: center; }
+                LineEdit {
+                    text <=> password-input;
+                    placeholder-text: "Password for " + password-ssid;
+                    input-type: password;
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    alignment: end;
+                    Button { text: "Cancel"; clicked => { show-password-modal = false; } }
+                    Rectangle {
+                        width: 140px;
+                        height: 44px;
+                        connect-touch := TouchArea { mouse-cursor: pointer; clicked => { show-password-modal = false; submit-password(password-ssid, password-input); } }
+                        NeumorphicPanel {
+                            pressed: connect-touch.pressed;
+                            has-hover: connect-touch.has-hover;
+                            main-color: Theme.primary;
+                            radius: 12px;
+                        }
+                        Text { text: "Connect"; color: white; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+            }
+        }
+    }
+
+    if (notification-message != "") : Rectangle {
+        y: parent.height - 80px;
+        x: (parent.width - 400px) / 2;
+        width: 400px;
+        height: 52px;
+        background: notification-success ? Theme.success : Theme.danger;
+        border-radius: 26px;
+        HorizontalLayout {
+            padding-left: 20px;
+            padding-right: 8px;
+            Text { text: notification-message; color: white; font-weight: 700; vertical-alignment: center; }
+            Rectangle {
+                width: 36px;
+                height: 36px;
+                IconButton {
+                    icon-text: "✕";
+                    clicked => { notification-message = ""; }
+                }
+            }
+        }
+        Timer { interval: 5s; triggered => { notification-message = ""; } }
+    }
+}

@@ -1,0 +1,15 @@
+Starting nmcli scan...
+nmcli output length: 307
+Parsing line: Airtel_anuj_7728:76:WPA2:*:11
+Parsing line: Airtel_gour_6869:45:WPA2: :2
+Parsing line: Airtel_PK_141:44:WPA2: :2
+Parsing line: Airtel_DarklordR:42:WPA2: :2
+Parsing line: Airtel_pankaj_6080:40:WPA2: :2
+Parsing line: Airtel_Devu:35:WPA2: :2
+Parsing line: Airtel_Gaurav singh:34:WPA2: :2
+Parsing line: Airtel_Prime link:27:WPA2: :2
+Parsing line: Airtel_kris_2294:25:WPA2: :2
+Parsing line: Relocatte:17:WPA2: :2
+Parsing line: Kamal Sharma:10:WPA2: :2
+Found 11 unique networks
+Updating UI with 11 networks
