@@ -52,8 +52,12 @@ The project follows a decoupled **Frontend-Backend** architecture using the Slin
 ---
 
 ## 📸 Features
-- ✅ Real-time signal strength indicators.
-- ✅ Support for hidden SSIDs.
-- ✅ Static IP/DNS configuration.
-- ✅ Subnet device scanner (Vendor & MAC detection).
-- ✅ Dark-themed Neumorphic UI.
+- ✅ **Real-Time Latency Tracking**: Dynamic ICMP ping latency measurement updating both header badge and active connection card every 4s.
+- ✅ **Fixed-Height Scrollable List**: Compact 4-card viewport (326px) with smooth flickable scrolling.
+- ✅ **VPN Discovery & Control**: Dedicated management for WireGuard, OpenVPN, and Cloudflare WARP with quick toggles and configuration/import modal.
+- ✅ **Custom Neumorphic Dark Inputs**: Dark inset fields and styled buttons matching the system aesthetic.
+- ✅ **Real-time signal strength indicators**.
+- ✅ **Support for hidden SSIDs**.
+- ✅ **Static IP/DNS configuration**.
+- ✅ **Subnet device scanner**: Vendor and MAC detection with one-click IP copying.
+

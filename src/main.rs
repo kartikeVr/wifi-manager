@@ -3,7 +3,7 @@ slint::include_modules!();
 use tokio::process::Command;
 use tokio::time::{sleep, Duration};
 use std::collections::HashMap;
-use slint::{ModelRc, VecModel, Weak};
+use slint::{Model, ModelRc, VecModel, Weak};
 use std::rc::Rc;
 
 #[derive(Debug, Clone)]
@@ -13,6 +13,16 @@ struct InternalNetwork {
     security: String,
     in_use: bool,
     channel: String,
+}
+
+#[derive(Debug, Clone)]
+struct InternalVpn {
+    name: String,
+    vpn_type: String,
+    connected: bool,
+    uuid: String,
+    gateway: String,
+    ip: String,
 }
 
 #[tokio::main]
@@ -152,6 +162,7 @@ async fn main() -> Result<(), slint::PlatformError> {
                             security: n.security.into(),
                             in_use: n.in_use,
                             channel: n.channel.into(),
+                            latency: "".into(),
                         });
                         ui.set_ip_address(settings.0.into());
                         ui.set_gateway(settings.1.into());
@@ -242,13 +253,349 @@ async fn main() -> Result<(), slint::PlatformError> {
         });
     });
 
-    // Run initial scan
+    // VPN Callbacks
+    let ui_weak_vpn = ui_weak.clone();
+    ui.on_toggle_vpn(move |uuid, enable| {
+        let ui = ui_weak_vpn.clone();
+        let uuid_str = uuid.to_string();
+        tokio::spawn(async move {
+            update_busy_status(&ui, true, if enable { "Connecting VPN..." } else { "Disconnecting VPN..." }).await;
+            if uuid_str == "warp-cli" {
+                let arg = if enable { "connect" } else { "disconnect" };
+                let _ = Command::new("warp-cli").arg(arg).output().await;
+                sleep(Duration::from_millis(1000)).await;
+            } else {
+                let arg = if enable { "up" } else { "down" };
+                let res = Command::new("nmcli").args(["connection", arg, &uuid_str]).output().await;
+                if let Ok(out) = res {
+                    if !out.status.success() {
+                        let err = String::from_utf8_lossy(&out.stderr);
+                        notify(&ui, &format!("VPN error: {}", err.trim()), false).await;
+                    }
+                }
+            }
+            let vpns = scan_vpns_cmd().await;
+            update_vpns(&ui, vpns).await;
+            update_busy_status(&ui, false, "").await;
+        });
+    });
+
+    let ui_weak_refresh_vpns = ui_weak.clone();
+    ui.on_refresh_vpns(move || {
+        let ui = ui_weak_refresh_vpns.clone();
+        tokio::spawn(async move {
+            let vpns = scan_vpns_cmd().await;
+            update_vpns(&ui, vpns).await;
+        });
+    });
+
+    let ui_weak_cfg = ui_weak.clone();
+    ui.on_open_vpn_config(move |uuid| {
+        let ui = ui_weak_cfg.clone();
+        let uuid_str = uuid.to_string();
+        tokio::spawn(async move {
+            let vpns = scan_vpns_cmd().await;
+            if let Some(v) = vpns.into_iter().find(|x| x.uuid == uuid_str) {
+                let mut dns = String::new();
+                if uuid_str != "warp-cli" {
+                    if let Ok(details) = Command::new("nmcli")
+                        .args(["-t", "-f", "ipv4.dns", "connection", "show", &uuid_str])
+                        .output()
+                        .await
+                    {
+                        let s = String::from_utf8_lossy(&details.stdout);
+                        for l in s.lines() {
+                            if let Some(val) = l.strip_prefix("ipv4.dns:") {
+                                if val != "--" { dns = val.to_string(); }
+                            }
+                        }
+                    }
+                }
+                let ui_copy = ui.clone();
+                slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_copy.upgrade() {
+                        ui.set_is_new_vpn(false);
+                        ui.set_vpn_modal_uuid(v.uuid.into());
+                        ui.set_vpn_modal_name(v.name.into());
+                        ui.set_vpn_modal_type(v.vpn_type.into());
+                        ui.set_vpn_modal_gateway(v.gateway.into());
+                        ui.set_vpn_modal_ip(v.ip.into());
+                        ui.set_vpn_modal_dns(dns.into());
+                        ui.set_show_vpn_modal(true);
+                    }
+                }).unwrap();
+            }
+        });
+    });
+
+    let ui_weak_add_vpn = ui_weak.clone();
+    ui.on_open_add_vpn(move || {
+        let ui_copy = ui_weak_add_vpn.clone();
+        slint::invoke_from_event_loop(move || {
+            if let Some(ui) = ui_copy.upgrade() {
+                ui.set_is_new_vpn(true);
+                ui.set_vpn_modal_uuid("".into());
+                ui.set_vpn_modal_name("".into());
+                ui.set_vpn_modal_file_path("".into());
+                ui.set_show_vpn_modal(true);
+            }
+        }).unwrap();
+    });
+
+    let ui_weak_close_vpn = ui_weak.clone();
+    ui.on_close_vpn_config(move || {
+        if let Some(ui) = ui_weak_close_vpn.upgrade() {
+            ui.set_show_vpn_modal(false);
+        }
+    });
+
+    let ui_weak_save_vpn = ui_weak.clone();
+    ui.on_save_vpn_config(move |uuid, name, gw, ip, dns| {
+        let ui = ui_weak_save_vpn.clone();
+        let uuid_str = uuid.to_string();
+        let name_str = name.to_string();
+        let gw_str = gw.to_string();
+        let ip_str = ip.to_string();
+        let dns_str = dns.to_string();
+
+        tokio::spawn(async move {
+            if uuid_str != "warp-cli" {
+                let mut args = vec!["connection", "modify", &uuid_str];
+                if !name_str.is_empty() {
+                    args.extend(["connection.id", &name_str]);
+                }
+                if !gw_str.is_empty() {
+                    args.extend(["ipv4.gateway", &gw_str]);
+                }
+                if !ip_str.is_empty() {
+                    args.extend(["ipv4.addresses", &ip_str]);
+                }
+                if !dns_str.is_empty() {
+                    args.extend(["ipv4.dns", &dns_str]);
+                }
+                let res = Command::new("nmcli").args(&args).output().await;
+                match res {
+                    Ok(out) => {
+                        if out.status.success() {
+                            notify(&ui, "VPN configuration saved", true).await;
+                        } else {
+                            let err = String::from_utf8_lossy(&out.stderr);
+                            notify(&ui, &format!("Save failed: {}", err.trim()), false).await;
+                        }
+                    }
+                    Err(e) => notify(&ui, &format!("Failed: {}", e), false).await,
+                }
+            } else {
+                notify(&ui, "WARP settings applied", true).await;
+            }
+            let vpns = scan_vpns_cmd().await;
+            update_vpns(&ui, vpns).await;
+        });
+    });
+
+    let ui_weak_del_vpn = ui_weak.clone();
+    ui.on_delete_vpn(move |uuid| {
+        let ui = ui_weak_del_vpn.clone();
+        let uuid_str = uuid.to_string();
+        tokio::spawn(async move {
+            if uuid_str != "warp-cli" {
+                let _ = Command::new("nmcli").args(["connection", "delete", &uuid_str]).output().await;
+                notify(&ui, "VPN deleted", true).await;
+                let vpns = scan_vpns_cmd().await;
+                update_vpns(&ui, vpns).await;
+            }
+        });
+    });
+
+    let ui_weak_import = ui_weak.clone();
+    ui.on_import_vpn_file(move |file_path, name| {
+        let ui = ui_weak_import.clone();
+        let path_str = file_path.to_string();
+        let name_str = name.to_string();
+        tokio::spawn(async move {
+            let path = path_str.trim();
+            if path.is_empty() {
+                notify(&ui, "File path cannot be empty", false).await;
+                return;
+            }
+            let vpn_type = if path.ends_with(".ovpn") { "openvpn" } else { "wireguard" };
+            let res = Command::new("nmcli")
+                .args(["connection", "import", "type", vpn_type, "file", path])
+                .output()
+                .await;
+
+            match res {
+                Ok(out) => {
+                    if out.status.success() {
+                        if !name_str.is_empty() {
+                            let stdout = String::from_utf8_lossy(&out.stdout);
+                            if let Some(imported_name) = stdout.split('\'').nth(1) {
+                                let _ = Command::new("nmcli")
+                                    .args(["connection", "modify", imported_name, "connection.id", &name_str])
+                                    .output()
+                                    .await;
+                            }
+                        }
+                        notify(&ui, "VPN imported successfully", true).await;
+                    } else {
+                        let err = String::from_utf8_lossy(&out.stderr);
+                        notify(&ui, &format!("Import failed: {}", err.trim()), false).await;
+                    }
+                }
+                Err(e) => notify(&ui, &format!("Failed: {}", e), false).await,
+            }
+            let vpns = scan_vpns_cmd().await;
+            update_vpns(&ui, vpns).await;
+        });
+    });
+
+    // Run initial scan & latency loop
     let ui_initial = ui_weak.clone();
     tokio::spawn(async move {
         refresh_status(ui_initial).await;
     });
 
+    let ui_weak_lat = ui_weak.clone();
+    tokio::spawn(async move {
+        loop {
+            sleep(Duration::from_secs(4)).await;
+            let lat = measure_latency().await;
+            let ui_copy = ui_weak_lat.clone();
+            slint::invoke_from_event_loop(move || {
+                if let Some(ui) = ui_copy.upgrade() {
+                    let has_connected = (0..ui.get_networks().row_count()).any(|i| {
+                        ui.get_networks().row_data(i).map(|n| n.in_use).unwrap_or(false)
+                    });
+                    if ui.get_wifi_enabled() && has_connected {
+                        ui.set_current_latency(lat.into());
+                    } else {
+                        ui.set_current_latency("".into());
+                    }
+                }
+            }).unwrap();
+        }
+    });
+
     ui.run()
+}
+
+async fn measure_latency() -> String {
+    let target = match Command::new("ip").args(["route", "show", "default"]).output().await {
+        Ok(out) => {
+            let s = String::from_utf8_lossy(&out.stdout);
+            s.split_whitespace()
+                .skip_while(|&w| w != "via")
+                .nth(1)
+                .map(|ip| ip.to_string())
+                .unwrap_or_else(|| "1.1.1.1".to_string())
+        }
+        Err(_) => "1.1.1.1".to_string(),
+    };
+
+    if let Ok(out) = Command::new("ping").args(["-c", "1", "-W", "1", &target]).output().await {
+        let s = String::from_utf8_lossy(&out.stdout);
+        for part in s.split_whitespace() {
+            if let Some(t) = part.strip_prefix("time=") {
+                if let Ok(val) = t.parse::<f32>() {
+                    return format!("{:.0} ms", val);
+                }
+                return format!("{} ms", t);
+            }
+        }
+    }
+    "--".to_string()
+}
+
+async fn scan_vpns_cmd() -> Vec<InternalVpn> {
+    let mut vpns = Vec::new();
+
+    let output = Command::new("nmcli")
+        .args(["-t", "-f", "NAME,TYPE,DEVICE,UUID", "connection", "show"])
+        .output()
+        .await
+        .ok();
+
+    if let Some(out) = output {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        for line in stdout.lines() {
+            let parts: Vec<&str> = line.split(':').collect();
+            if parts.len() >= 4 {
+                let name = parts[0].to_string();
+                let conn_type = parts[1];
+                let device = parts[2];
+                let uuid = parts[3].to_string();
+
+                if conn_type == "vpn" || conn_type == "wireguard" {
+                    let connected = !device.is_empty() && device != "--";
+                    let mut ip = String::new();
+                    let mut gateway = String::new();
+
+                    if let Ok(details) = Command::new("nmcli")
+                        .args(["-t", "-f", "ipv4.addresses,ipv4.gateway", "connection", "show", &uuid])
+                        .output()
+                        .await
+                    {
+                        let d_str = String::from_utf8_lossy(&details.stdout);
+                        for d_line in d_str.lines() {
+                            let d_parts: Vec<&str> = d_line.splitn(2, ':').collect();
+                            if d_parts.len() == 2 && d_parts[1] != "--" {
+                                if d_parts[0] == "ipv4.addresses" { ip = d_parts[1].to_string(); }
+                                else if d_parts[0] == "ipv4.gateway" { gateway = d_parts[1].to_string(); }
+                            }
+                        }
+                    }
+
+                    vpns.push(InternalVpn {
+                        name,
+                        vpn_type: if conn_type == "wireguard" { "WireGuard".into() } else { "OpenVPN".into() },
+                        connected,
+                        uuid,
+                        gateway,
+                        ip,
+                    });
+                }
+            }
+        }
+    }
+
+    // Check Cloudflare WARP
+    if Command::new("which").arg("warp-cli").output().await.map(|o| o.status.success()).unwrap_or(false) {
+        let warp_connected = if let Ok(out) = Command::new("warp-cli").arg("status").output().await {
+            String::from_utf8_lossy(&out.stdout).contains("Connected")
+        } else {
+            false
+        };
+
+        vpns.push(InternalVpn {
+            name: "Cloudflare WARP".into(),
+            vpn_type: "WARP".into(),
+            connected: warp_connected,
+            uuid: "warp-cli".into(),
+            gateway: "1.1.1.1".into(),
+            ip: if warp_connected { "100.96.0.1".into() } else { "".into() },
+        });
+    }
+
+    vpns
+}
+
+async fn update_vpns(ui: &Weak<AppWindow>, vpns: Vec<InternalVpn>) {
+    let slint_vpns: Vec<VpnInfo> = vpns.into_iter().map(|v| VpnInfo {
+        name: v.name.into(),
+        vpn_type: v.vpn_type.into(),
+        connected: v.connected,
+        uuid: v.uuid.into(),
+        gateway: v.gateway.into(),
+        ip: v.ip.into(),
+    }).collect();
+
+    let ui_copy = ui.clone();
+    slint::invoke_from_event_loop(move || {
+        if let Some(ui) = ui_copy.upgrade() {
+            let model = VecModel::from(slint_vpns);
+            ui.set_vpns(ModelRc::from(Rc::new(model)));
+        }
+    }).unwrap();
 }
 
 async fn connect_network_cmd(ssid: String, password: Option<String>) -> Result<(), String> {
@@ -277,6 +624,9 @@ async fn refresh_status(ui: Weak<AppWindow>) {
         }
     }).unwrap();
 
+    let vpns = scan_vpns_cmd().await;
+    update_vpns(&ui, vpns).await;
+
     if enabled {
         let networks = scan_networks_cmd().await;
         update_networks(&ui, networks).await;
@@ -285,19 +635,23 @@ async fn refresh_status(ui: Weak<AppWindow>) {
 
 async fn update_networks(ui: &Weak<AppWindow>, networks: Vec<InternalNetwork>) {
     println!("Updating UI with {} networks", networks.len());
+    let latency = measure_latency().await;
     let slint_networks: Vec<NetworkInfo> = networks.into_iter().map(|n| NetworkInfo {
         ssid: n.ssid.into(),
         signal: n.signal,
         security: n.security.into(),
         in_use: n.in_use,
         channel: n.channel.into(),
+        latency: if n.in_use { latency.clone().into() } else { "".into() },
     }).collect();
 
     let ui_copy = ui.clone();
+    let lat_copy = latency.clone();
     slint::invoke_from_event_loop(move || {
         if let Some(ui) = ui_copy.upgrade() {
             let model = VecModel::from(slint_networks);
             ui.set_networks(ModelRc::from(Rc::new(model)));
+            ui.set_current_latency(lat_copy.into());
         }
     }).unwrap();
 }

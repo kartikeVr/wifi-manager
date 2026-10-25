@@ -1,5 +1,3 @@
-import { Button, CheckBox, LineEdit } from "std-widgets.slint";
-
 component CustomScrollBar {
     in property <bool> enabled: true;
     in-out property <bool> horizontal: false;
@@ -88,7 +86,7 @@ component CustomScrollView {
     preferred-width: 100%;
 
     flickable := Flickable {
-        interactive: false;
+        interactive: true;
         viewport-y <=> vertical-bar.value;
         viewport-x <=> horizontal-bar.value;
         width: 100%;
@@ -124,6 +122,16 @@ export struct NetworkInfo {
     security: string,
     in_use: bool,
     channel: string,
+    latency: string,
+}
+
+export struct VpnInfo {
+    name: string,
+    vpn_type: string,
+    connected: bool,
+    uuid: string,
+    gateway: string,
+    ip: string,
 }
 
 export struct ConnectedDevice {
@@ -244,34 +252,161 @@ component SignalIndicator inherits Rectangle {
     }
 }
 
+component DarkInput inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder: "";
+    in property <InputType> input-type: InputType.text;
+    in property <bool> enabled: true;
+    callback accepted <=> input.accepted;
+
+    height: 48px;
+    background: Theme.bg.darker(5%);
+    border-radius: 14px;
+    border-width: 1.5px;
+    border-color: input.has-focus ? Theme.primary : Theme.border;
+    animate border-color { duration: 150ms; }
+
+    NeumorphicPanel { radius: 14px; pressed: true; }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        
+        Rectangle {
+            clip: true;
+            if (input.text == "" && placeholder != "") : Text {
+                width: 100%;
+                height: 100%;
+                text: placeholder;
+                color: Theme.text-muted.transparentize(40%);
+                font-size: 14px;
+                vertical-alignment: center;
+            }
+            input := TextInput {
+                width: 100%;
+                height: 100%;
+                color: Theme.text-main;
+                font-size: 14px;
+                font-weight: 600;
+                input-type: root.input-type;
+                enabled: root.enabled;
+                single-line: true;
+                vertical-alignment: center;
+                selection-background-color: Theme.primary;
+                selection-foreground-color: white;
+            }
+        }
+    }
+}
+
+component CustomButton inherits Rectangle {
+    in property <string> text;
+    in property <color> bg-color: Theme.bg;
+    in property <color> hover-color: bg-color.brighter(10%);
+    in property <color> text-color: Theme.text-main;
+    in property <length> font-size: 14px;
+    in property <int> font-weight: 700;
+    callback clicked <=> touch.clicked;
+
+    height: 44px;
+    min-width: 90px;
+    border-radius: 12px;
+
+    NeumorphicPanel {
+        pressed: touch.pressed;
+        has-hover: touch.has-hover;
+        main-color: touch.has-hover ? root.hover-color : root.bg-color;
+        radius: 12px;
+    }
+
+    Text {
+        text: root.text;
+        color: root.text-color;
+        font-size: root.font-size;
+        font-weight: root.font-weight;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+    }
+}
+
 component ConfigField inherits Rectangle {
     in property <string> label;
     in-out property <string> value;
     in property <string> icon: "✎";
+    in property <string> placeholder: "";
 
-    height: 60px;
-    background: Theme.bg;
-    border-radius: 16px;
+    height: 54px;
+    background: Theme.bg.darker(4%);
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.primary : Theme.border;
+    animate border-color { duration: 150ms; }
 
-    NeumorphicPanel { radius: 16px; pressed: true; }
+    NeumorphicPanel { radius: 14px; pressed: true; }
 
     HorizontalLayout {
-        padding-left: 20px;
+        padding-left: 16px;
         padding-right: 16px;
         spacing: 12px;
-        Text { text: icon; color: Theme.primary; font-size: 18px; vertical-alignment: center; width: 24px; }
-        Text { text: label; width: 100px; color: Theme.text-muted; font-size: 13px; font-weight: 700; vertical-alignment: center; }
-        LineEdit {
-            text <=> value;
-            font-size: 15px;
+        
+        VerticalLayout {
+            alignment: center;
+            width: 22px;
+            Text {
+                text: icon;
+                color: Theme.primary;
+                font-size: 16px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        
+        VerticalLayout {
+            alignment: center;
+            width: 85px;
+            Text {
+                text: label;
+                color: Theme.text-muted;
+                font-size: 13px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+        }
+        
+        Rectangle {
+            clip: true;
+            if (value == "" && placeholder != "") : Text {
+                width: 100%;
+                height: 100%;
+                text: placeholder;
+                color: Theme.text-muted.transparentize(50%);
+                font-size: 14px;
+                vertical-alignment: center;
+            }
+            input := TextInput {
+                width: 100%;
+                height: 100%;
+                text <=> value;
+                color: Theme.text-main;
+                font-size: 14px;
+                font-weight: 600;
+                single-line: true;
+                vertical-alignment: center;
+                selection-background-color: Theme.primary;
+                selection-foreground-color: white;
+            }
         }
     }
 }
 
 export component AppWindow inherits Window {
     title: "Wi-Fi Manager";
-    min-width: 420px;
-    height: 700px;
+    min-width: 440px;
+    height: 720px;
     background: Theme.bg;
     default-font-family: "Inter, sans-serif";
     
@@ -296,6 +431,21 @@ export component AppWindow inherits Window {
     in property <string> password-ssid: "";
     in-out property <string> password-input: "";
 
+    in property <string> current-latency: "";
+    in property <[VpnInfo]> vpns: [];
+    in property <bool> loading-vpns: false;
+
+    // VPN Config Modal
+    in-out property <bool> show-vpn-modal: false;
+    in-out property <bool> is-new-vpn: false;
+    in-out property <string> vpn-modal-uuid: "";
+    in-out property <string> vpn-modal-name: "";
+    in-out property <string> vpn-modal-type: "WireGuard";
+    in-out property <string> vpn-modal-gateway: "";
+    in-out property <string> vpn-modal-ip: "";
+    in-out property <string> vpn-modal-dns: "";
+    in-out property <string> vpn-modal-file-path: "";
+
     callback toggle-wifi(bool);
     callback scan-networks();
     callback connect-network(string);
@@ -308,6 +458,15 @@ export component AppWindow inherits Window {
     callback refresh-devices();
     callback copy-ip(string);
     callback exit();
+
+    callback toggle-vpn(string, bool);
+    callback refresh-vpns();
+    callback open-vpn-config(string);
+    callback open-add-vpn();
+    callback close-vpn-config();
+    callback save-vpn-config(string, string, string, string, string);
+    callback delete-vpn(string);
+    callback import-vpn-file(string, string);
 
     forward-focus: key-handler;
     key-handler := FocusScope {
@@ -435,67 +594,303 @@ export component AppWindow inherits Window {
                         }
 
                         if (wifi-enabled) : VerticalLayout {
-                            spacing: 20px;
-                            padding-bottom: 20px;
+                            spacing: 14px;
                             padding-left: 10px;
                             padding-right: 10px;
                             vertical-stretch: 0;
-                            for net in networks : Rectangle {
-                                height: 84px;
-                                vertical-stretch: 0;
-                                NeumorphicPanel {
-                                    pressed: card-touch.pressed;
-                                    has-hover: card-touch.has-hover;
-                                    main-color: net.in-use ? rgba(139, 92, 246, 0.15) : Theme.bg;
+
+                            // Nearby networks header with latency badge
+                            HorizontalLayout {
+                                alignment: space-between;
+                                Text {
+                                    text: "NEARBY NETWORKS";
+                                    font-size: 12px;
+                                    font-weight: 800;
+                                    color: Theme.text-muted;
+                                    letter-spacing: 1.5px;
+                                    vertical-alignment: center;
                                 }
-                                
-                                HorizontalLayout {
-                                    padding: 20px;
-                                    padding-left: 20px;
-                                    padding-right: 20px;
-                                    spacing: 20px;
-                                    
-                                    Rectangle {
-                                        width: 44px;
-                                        height: 44px;
-                                        background: Theme.bg;
-                                        border-radius: 10px;
-                                        VerticalLayout {
-                                            alignment: center;
-                                            SignalIndicator { signal: net.signal; }
-                                            Text {
-                                                text: net.signal + "%";
-                                                font-size: 9px;
-                                                color: Theme.text-muted;
-                                                horizontal-alignment: center;
+                                if (current-latency != "") : HorizontalLayout {
+                                    spacing: 4px;
+                                    alignment: center;
+                                    Text { text: "⚡"; font-size: 12px; color: Theme.warning; vertical-alignment: center; }
+                                    Text { text: "Latency: " + current-latency; font-size: 12px; font-weight: 700; color: Theme.success; vertical-alignment: center; }
+                                }
+                            }
+
+                            // 4-item visible scrollable Wi-Fi container (326px = 4 * 74px + 3 * 10px)
+                            Rectangle {
+                                height: 326px;
+                                clip: true;
+                                CustomScrollView {
+                                    VerticalLayout {
+                                        spacing: 10px;
+                                        padding-right: 10px;
+                                        for net in networks : Rectangle {
+                                            height: 74px;
+                                            vertical-stretch: 0;
+                                            NeumorphicPanel {
+                                                pressed: card-touch.pressed;
+                                                has-hover: card-touch.has-hover;
+                                                main-color: net.in-use ? rgba(139, 92, 246, 0.15) : Theme.bg;
+                                            }
+                                            
+                                            HorizontalLayout {
+                                                padding: 14px;
+                                                padding-left: 16px;
+                                                padding-right: 16px;
+                                                spacing: 16px;
+                                                
+                                                Rectangle {
+                                                    width: 44px;
+                                                    height: 44px;
+                                                    background: Theme.bg;
+                                                    border-radius: 10px;
+                                                    VerticalLayout {
+                                                        alignment: center;
+                                                        SignalIndicator { signal: net.signal; }
+                                                        Text {
+                                                            text: net.signal + "%";
+                                                            font-size: 9px;
+                                                            color: Theme.text-muted;
+                                                            horizontal-alignment: center;
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                VerticalLayout {
+                                                    alignment: center;
+                                                    spacing: 3px;
+                                                    Text { text: net.ssid; font-size: 16px; font-weight: 700; color: Theme.text-main; overflow: elide; }
+                                                    HorizontalLayout {
+                                                        spacing: 8px;
+                                                        Text { 
+                                                            text: (net.in-use ? "Connected" : (net.security == "" ? "Open" : net.security));
+                                                            font-size: 13px; 
+                                                            color: net.in-use ? Theme.success : Theme.text-muted; 
+                                                        }
+                                                        if (net.in-use && (current-latency != "" || net.latency != "")) : Text {
+                                                            text: "• " + (current-latency != "" ? current-latency : net.latency);
+                                                            font-size: 13px;
+                                                            font-weight: 700;
+                                                            color: Theme.primary;
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                Rectangle { } 
+
+                                                VerticalLayout {
+                                                    alignment: center;
+                                                    Text { text: "❯"; font-size: 16px; color: Theme.divider; }
+                                                }
+                                            }
+
+                                            card-touch := TouchArea {
+                                                clicked => { connect-network(net.ssid); }
+                                                pointer-event(evt) => {
+                                                    if (evt.button == PointerEventButton.right && evt.kind == PointerEventKind.down) {
+                                                        open-advanced(net.ssid);
+                                                    }
+                                                }
                                             }
                                         }
                                     }
-                                    
-                                    VerticalLayout {
-                                        alignment: center;
-                                        spacing: 4px;
-                                        Text { text: net.ssid; font-size: 18px; font-weight: 700; color: Theme.text-main; overflow: elide; }
-                                        Text { 
-                                            text: (net.in-use ? "Connected" : (net.security == "" ? "Open" : net.security));
-                                            font-size: 14px; 
-                                            color: net.in-use ? Theme.success : Theme.text-muted; 
-                                        }
-                                    }
-                                    
-                                    Rectangle { } 
+                                }
+                            }
 
-                                    VerticalLayout {
+                            // VPN Section in remaining space
+                            VerticalLayout {
+                                spacing: 10px;
+                                vertical-stretch: 1;
+
+                                HorizontalLayout {
+                                    alignment: space-between;
+                                    Text {
+                                        text: "VPN CONNECTIONS";
+                                        font-size: 12px;
+                                        font-weight: 800;
+                                        color: Theme.text-muted;
+                                        letter-spacing: 1.5px;
+                                        vertical-alignment: center;
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
                                         alignment: center;
-                                        Text { text: "❯"; font-size: 16px; color: Theme.divider; }
+                                        Rectangle {
+                                            width: 30px;
+                                            height: 30px;
+                                            NeumorphicPanel {
+                                                radius: 8px;
+                                                has-hover: add-vpn-touch.has-hover;
+                                                pressed: add-vpn-touch.pressed;
+                                            }
+                                            Text {
+                                                text: "+";
+                                                font-size: 18px;
+                                                font-weight: 800;
+                                                color: Theme.primary;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                            add-vpn-touch := TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => { open-add-vpn(); }
+                                            }
+                                        }
+                                        Rectangle {
+                                            width: 30px;
+                                            height: 30px;
+                                            NeumorphicPanel {
+                                                radius: 8px;
+                                                has-hover: refresh-vpn-touch.has-hover;
+                                                pressed: refresh-vpn-touch.pressed;
+                                            }
+                                            Text {
+                                                text: "↻";
+                                                font-size: 15px;
+                                                color: Theme.text-main;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                            refresh-vpn-touch := TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => { refresh-vpns(); }
+                                            }
+                                        }
                                     }
                                 }
 
-                                card-touch := TouchArea {
-                                    clicked => { connect-network(net.ssid); }
-                                    pointer-event(evt) => {
-                                        if (evt.button == PointerEventButton.right && evt.kind == PointerEventKind.down) {
-                                            open-advanced(net.ssid);
+                                Rectangle {
+                                    min-height: 140px;
+                                    max-height: 180px;
+                                    clip: true;
+                                    CustomScrollView {
+                                        VerticalLayout {
+                                            spacing: 8px;
+                                            padding-right: 10px;
+                                            for vpn in vpns : Rectangle {
+                                                height: 64px;
+                                                vertical-stretch: 0;
+                                                NeumorphicPanel {
+                                                    radius: 12px;
+                                                    main-color: vpn.connected ? rgba(16, 185, 129, 0.12) : Theme.bg;
+                                                }
+                                                HorizontalLayout {
+                                                    padding-left: 16px;
+                                                    padding-right: 16px;
+                                                    spacing: 12px;
+                                                    alignment: space-between;
+                                                    
+                                                    HorizontalLayout {
+                                                        spacing: 12px;
+                                                        alignment: start;
+                                                        
+                                                        VerticalLayout {
+                                                            alignment: center;
+                                                            Rectangle {
+                                                                width: 38px;
+                                                                height: 38px;
+                                                                background: Theme.bg;
+                                                                border-radius: 8px;
+                                                                Text {
+                                                                    text: vpn.connected ? "🛡️" : "🔒";
+                                                                    font-size: 18px;
+                                                                    horizontal-alignment: center;
+                                                                    vertical-alignment: center;
+                                                                }
+                                                            }
+                                                        }
+
+                                                        VerticalLayout {
+                                                            alignment: center;
+                                                            spacing: 2px;
+                                                            Text {
+                                                                text: vpn.name;
+                                                                font-size: 15px;
+                                                                font-weight: 700;
+                                                                color: Theme.text-main;
+                                                                overflow: elide;
+                                                            }
+                                                            Text {
+                                                                text: vpn.connected ? ("Connected" + (vpn.ip != "" ? " • " + vpn.ip : "")) : (vpn.vpn-type + " • Off");
+                                                                font-size: 11px;
+                                                                color: vpn.connected ? Theme.success : Theme.text-muted;
+                                                            }
+                                                        }
+                                                    }
+
+                                                    HorizontalLayout {
+                                                        spacing: 12px;
+                                                        alignment: end;
+
+                                                        VerticalLayout {
+                                                            alignment: center;
+                                                            Rectangle {
+                                                                width: 34px;
+                                                                height: 34px;
+                                                                NeumorphicPanel {
+                                                                    radius: 9px;
+                                                                    has-hover: vpn-edit-touch.has-hover;
+                                                                    pressed: vpn-edit-touch.pressed;
+                                                                }
+                                                                Text {
+                                                                    text: "⚙";
+                                                                    font-size: 16px;
+                                                                    color: vpn-edit-touch.has-hover ? Theme.text-main : Theme.text-muted;
+                                                                    horizontal-alignment: center;
+                                                                    vertical-alignment: center;
+                                                                    animate color { duration: 150ms; }
+                                                                }
+                                                                vpn-edit-touch := TouchArea {
+                                                                    mouse-cursor: pointer;
+                                                                    clicked => { open-vpn-config(vpn.uuid); }
+                                                                }
+                                                            }
+                                                        }
+
+                                                        VerticalLayout {
+                                                            alignment: center;
+                                                            Rectangle {
+                                                                width: 50px;
+                                                                height: 28px;
+                                                                NeumorphicPanel {
+                                                                    radius: 14px;
+                                                                    has-hover: vpn-toggle-touch.has-hover;
+                                                                    main-color: vpn.connected ? Theme.success : Theme.bg;
+                                                                }
+                                                                Rectangle {
+                                                                    x: vpn.connected ? 26px : 4px;
+                                                                    y: 4px;
+                                                                    width: 20px;
+                                                                    height: 20px;
+                                                                    background: white;
+                                                                    border-radius: 10px;
+                                                                    animate x { duration: 180ms; easing: ease-in-out; }
+                                                                    drop-shadow-color: #0004;
+                                                                    drop-shadow-offset-y: 1px;
+                                                                    drop-shadow-blur: 2px;
+                                                                }
+                                                                vpn-toggle-touch := TouchArea {
+                                                                    mouse-cursor: pointer;
+                                                                    clicked => { toggle-vpn(vpn.uuid, !vpn.connected); }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            if (vpns.length == 0) : Rectangle {
+                                                height: 60px;
+                                                NeumorphicPanel { radius: 12px; main-color: Theme.bg.darker(3%); }
+                                                HorizontalLayout {
+                                                    alignment: center;
+                                                    spacing: 8px;
+                                                    Text { text: "🔒"; font-size: 15px; vertical-alignment: center; }
+                                                    Text { text: "No VPNs configured (Click + to add)"; font-size: 12px; color: Theme.text-muted; vertical-alignment: center; }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -651,26 +1046,169 @@ export component AppWindow inherits Window {
                 padding: 32px;
                 spacing: 24px;
                 Text { text: "Authentication Required"; font-size: 20px; font-weight: 800; color: Theme.text-main; horizontal-alignment: center; }
-                LineEdit {
+                DarkInput {
                     text <=> password-input;
-                    placeholder-text: "Password for " + password-ssid;
-                    input-type: password;
+                    placeholder: "Password for " + password-ssid;
+                    input-type: InputType.password;
+                    accepted => {
+                        show-password-modal = false;
+                        submit-password(password-ssid, password-input);
+                    }
                 }
                 HorizontalLayout {
                     spacing: 16px;
                     alignment: end;
-                    Button { text: "Cancel"; clicked => { show-password-modal = false; } }
-                    Rectangle {
+                    CustomButton {
+                        text: "Cancel";
+                        width: 100px;
+                        bg-color: Theme.bg;
+                        text-color: Theme.text-muted;
+                        clicked => { show-password-modal = false; }
+                    }
+                    CustomButton {
+                        text: "Connect";
                         width: 140px;
-                        height: 44px;
-                        connect-touch := TouchArea { mouse-cursor: pointer; clicked => { show-password-modal = false; submit-password(password-ssid, password-input); } }
-                        NeumorphicPanel {
-                            pressed: connect-touch.pressed;
-                            has-hover: connect-touch.has-hover;
-                            main-color: Theme.primary;
-                            radius: 12px;
+                        bg-color: Theme.primary;
+                        hover-color: Theme.primary-hover;
+                        text-color: white;
+                        font-weight: 800;
+                        clicked => {
+                            show-password-modal = false;
+                            submit-password(password-ssid, password-input);
                         }
-                        Text { text: "Connect"; color: white; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+            }
+        }
+    }
+
+    if (show-vpn-modal) : Rectangle {
+        background: rgba(0,0,0,0.6);
+        TouchArea { } // Block clicks underneath
+        Rectangle {
+            width: 400px;
+            height: is-new-vpn ? 360px : 440px;
+            NeumorphicPanel { radius: 24px; }
+            VerticalLayout {
+                padding: 28px;
+                spacing: 16px;
+
+                HorizontalLayout {
+                    alignment: space-between;
+                    Text {
+                        text: is-new-vpn ? "Add / Import VPN" : "VPN Configuration";
+                        font-size: 18px;
+                        font-weight: 800;
+                        color: Theme.text-main;
+                    }
+                    IconButton {
+                        icon-text: "✕";
+                        clicked => { show-vpn-modal = false; }
+                    }
+                }
+
+                if (is-new-vpn) : VerticalLayout {
+                    spacing: 14px;
+                    Text {
+                        text: "Import WireGuard (.conf) or OpenVPN (.ovpn):";
+                        font-size: 13px;
+                        color: Theme.text-muted;
+                    }
+                    ConfigField {
+                        label: "File Path";
+                        value <=> vpn-modal-file-path;
+                        icon: "📁";
+                    }
+                    ConfigField {
+                        label: "Name";
+                        value <=> vpn-modal-name;
+                        icon: "🏷️";
+                    }
+                    HorizontalLayout {
+                        spacing: 14px;
+                        alignment: end;
+                        CustomButton {
+                            text: "Cancel";
+                            width: 100px;
+                            bg-color: Theme.bg;
+                            text-color: Theme.text-muted;
+                            clicked => { show-vpn-modal = false; }
+                        }
+                        CustomButton {
+                            text: "Import & Add";
+                            width: 140px;
+                            bg-color: Theme.primary;
+                            hover-color: Theme.primary-hover;
+                            text-color: white;
+                            font-weight: 800;
+                            clicked => {
+                                show-vpn-modal = false;
+                                import-vpn-file(vpn-modal-file-path, vpn-modal-name);
+                            }
+                        }
+                    }
+                }
+
+                if (!is-new-vpn) : VerticalLayout {
+                    spacing: 12px;
+                    ConfigField {
+                        label: "Name";
+                        value <=> vpn-modal-name;
+                        icon: "🏷️";
+                    }
+                    ConfigField {
+                        label: "Gateway";
+                        value <=> vpn-modal-gateway;
+                        icon: "🌐";
+                    }
+                    ConfigField {
+                        label: "DNS";
+                        value <=> vpn-modal-dns;
+                        icon: "📛";
+                    }
+                    ConfigField {
+                        label: "Addresses";
+                        value <=> vpn-modal-ip;
+                        icon: "📍";
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        alignment: space-between;
+                        if (vpn-modal-uuid != "warp-cli") : CustomButton {
+                            text: "Delete";
+                            width: 100px;
+                            bg-color: Theme.danger;
+                            hover-color: Theme.danger.brighter(10%);
+                            text-color: white;
+                            clicked => {
+                                show-vpn-modal = false;
+                                delete-vpn(vpn-modal-uuid);
+                            }
+                        }
+                        if (vpn-modal-uuid == "warp-cli") : Rectangle { width: 1px; }
+                        HorizontalLayout {
+                            spacing: 12px;
+                            alignment: end;
+                            CustomButton {
+                                text: "Cancel";
+                                width: 100px;
+                                bg-color: Theme.bg;
+                                text-color: Theme.text-muted;
+                                clicked => { show-vpn-modal = false; }
+                            }
+                            CustomButton {
+                                text: "Save";
+                                width: 120px;
+                                bg-color: Theme.primary;
+                                hover-color: Theme.primary-hover;
+                                text-color: white;
+                                font-weight: 800;
+                                clicked => {
+                                    show-vpn-modal = false;
+                                    save-vpn-config(vpn-modal-uuid, vpn-modal-name, vpn-modal-gateway, vpn-modal-ip, vpn-modal-dns);
+                                }
+                            }
+                        }
                     }
                 }
             }
